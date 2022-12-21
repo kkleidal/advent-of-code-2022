@@ -37,187 +37,107 @@ MAX_TIME = 24
 
 ORDER = ["geode", "obsidian", "clay", "ore"]
 
+def ceil_div(x, y):
+    if x == 0:
+        return 0
+    return x // y + (1 if x % y > 0 else 0)
+
 @dataclass(frozen=True)
 class State:
+    time: int
     resources: Tuple[int, int, int, int]
     robots: Tuple[int, int, int, int]
     pending_robots: Tuple[int, int, int, int]
-    time: int = 0
-
-    def __gt__(self, other):
-        return (self.time, self.resources, self.robots, self.pending_robots) < (other.time, other.resources, other.robots, other.pending_robots)
-
-    def prune_state(self):
-        if any(self.pending_robots):
-            return None
-        return self.resources + self.robots
-
-    def get_key(self, blueprint):
-        # TODO: maybe Upperbound on potential geodes, obsideon, clay, ore if trying to maximize each
-        ...
-
-    def sufficient_resources(self, reqs):
-        for k, v in reqs.items():
-            if self.resources[k] < v:
-                return False
-        return True
-
-    def missing_resources(self, reqs):
-        missing = {}
-        for k, v in reqs.items():
-            if self.resources[k] < v:
-                missing[k] = v - self.resources[k]
-        return missing
-
-    def start_making_bot(self, bot, reqs):
-        assert self.sufficient_resources(reqs)
-        return dataclasses.replace(self,
-            resources=tuple(c - reqs.get(i, 0) for i, c in enumerate(self.resources)),
-            pending_robots=tuple(c + (1 if i == bot else 0) for i, c in enumerate(self.pending_robots)),
+    
+    def subsumes(self, other):
+        # # WARNING: Possibly inadmissable heuristic:
+        # if self.time <= other.time and self.resources[0] > other.resources[0] and self.robots[0] > other.robots[0]:
+        #     return True
+        # if self.time <= other.time and all(self.resources[i] >= other.resources[i] and self.robots[i] >= other.robots[i] for i in range(1)) and self.resources[1] > other.resources[1] and self.robots[1] > other.robots[1]:
+        #     return True
+        # # if self.time <= other.time and all(self.resources[i] >= other.resources[i] and self.robots[i] >= other.robots[i] for i in range(2)) and self.resources[2] > other.resources[2] and self.robots[2] > other.robots[2]:
+        # #     return True
+            
+        return (
+            self.time <= other.time
+            and all(s >= o for s, o in zip(self.resources, other.resources))
+            and all(s >= o for s, o in zip(self.robots, other.robots))
+            and all(s >= o for s, o in zip(self.pending_robots, other.pending_robots))
         )
 
-    def time_step(self):
+    def reachable_bots(self, blueprint):
+        for bot, reqs in enumerate(blueprint):
+            if all(req == 0 or rob > 0 or pending > 0 for rob, req, pending in zip(self.robots, reqs, self.pending_robots)):
+                all_times = []
+                for cur, rob, req, pending in zip(self.resources, self.robots, reqs, self.pending_robots):
+                    time = 0
+                    while cur < req:
+                        time += 1
+                        cur += rob
+                        rob += pending
+                        pending = 0
+                    all_times.append(time)
+                time = max(all_times)
+                yield bot, time
+
+    def build_bot(self, bot, blueprint):
+        assert all(r >= blueprint[bot][i] for i, r in enumerate(self.resources))
         return dataclasses.replace(self,
-            resources=tuple(c + self.robots[i] for i, c in enumerate(self.resources)),
-            robots=tuple(c + self.pending_robots[i] for i, c in enumerate(self.robots)),
-            pending_robots=tuple(0 for i, c in enumerate(self.pending_robots)),
-            time=self.time + 1,
+            resources=tuple(r - blueprint[bot][i] for i, r in enumerate(self.resources)),
+            pending_robots=tuple(p + (1 if i == bot else 0) for i, p in enumerate(self.pending_robots)),
+        )
+
+    def step(self):
+        return dataclasses.replace(self,
+            time=self.time+1,
+            resources=tuple(r + bots for r, bots in zip(self.resources, self.robots)),
+            robots=tuple(r + bots for r, bots in zip(self.robots, self.pending_robots)),
+            pending_robots=tuple(0 for _ in self.pending_robots),
         )
         
 
-best_found = None
+def find_optimal_strategy_recurse(state, blueprint, cache, prune_cache):
+    if state in cache:
+        return cache[state]
+    if state.time not in prune_cache:
+        prune_cache[state.time] = []
+    if any(cached.subsumes(state) for cached in prune_cache[state.time]):
+        return 0
+    # print(state)
+    new_states = []
+    for bot, time in state.reachable_bots(blueprint):
+        new_state = state
+        for _ in range(time):
+            new_state = new_state.step()
+        if new_state.time < MAX_TIME:
+            new_state = new_state.build_bot(bot, blueprint)
+            new_states.append(new_state)
+    if len(new_states) == 0:
+        new_state = state
+        while new_state.time < MAX_TIME:
+            new_state = new_state.step()
+        cache[state] = new_state.resources[0]
+    else:
+        cache[state] = max(
+            find_optimal_strategy_recurse(ns, blueprint, cache, prune_cache)
+            for ns in new_states
+        )
+    prune_cache[state.time] = [cached for cached in prune_cache[state.time] if not state.subsumes(cached)] + [state]
+    return cache[state]
 
-def clear_print_state():
-    global best_found, prune1, prune2
-    best_found = 0
-    prune1 = 0
-    prune2 = 0
+def find_optimal_strategy_geodes(blueprint): 
+    blueprint = [[blueprint[ORDER[i]].get(ORDER[j], 0) for j in range(4)] for i in range(4)]
+    state = State(time=0, resources=(0, 0, 0, 0), robots=(0, 0, 0, 1), pending_robots=(0, 0, 0, 0))
+    return find_optimal_strategy_recurse(state, blueprint, {}, {})
 
-import time
-def maybe_print(val, *args):
-    global best_found
-    now = time.time()
-    if best_found is None or val > best_found:
-        best_found = val
-        print("Best found:", best_found, *args)
-    
-
-def will_waiting_let_me_build_a_bot_we_cant_build_now(state, blueprint):
-    for bot, reqs in reversed(blueprint.items()):
-        missing_resources = state.missing_resources(reqs)
-        if all(state.robots[k] > 0 for k in missing_resources):
-            # We'll get there eventually
-            return True
-    return False
-    
-# def find_optimal_strategy_recurse(blueprint, state, cache, prune_cache, prune_cache2):
-#     global prune1, prune2
-#     if state.time == MAX_TIME:
-#         maybe_print(state.resources[ORDER.index("geode")])
-#         return state.resources[ORDER.index("geode")]
-#     if state not in cache:
-#         prune_state = state.prune_state()
-#         if prune_state:
-#             t = state.time
-#             if t not in prune_cache:
-#                 prune_cache[t] = []
-#             if prune_cache[t] and any(all(e1 <= e2 for e1, e2 in zip(prune_state, pc)) for pc in prune_cache[t]):
-#                 cache[state] = 0
-#                 prune1 += 1
-#                 # print("PRUNE")
-#                 return cache[state]
-#             if prune_state in prune_cache2:
-#                 if prune_cache2[prune_state] <= t:
-#                     cache[state] = 0
-#                     prune2 += 1
-#                     return cache[state]
-#     
-#         # print(state)
-#         def next_possib_states():
-#             can_build = False
-#             for bot, reqs in reversed(blueprint.items()):
-#                 if state.sufficient_resources(reqs):
-#                     can_build = True
-#                     yield state.start_making_bot(bot, reqs)
-#             if not can_build or will_waiting_let_me_build_a_bot_we_cant_build_now(state, blueprint):
-#                 # Otherwise, there's no point in waiting
-#                 yield state.time_step()
-# 
-#         if prune_state:
-#             prune_cache[t].append(prune_state)
-#             if prune_state not in prune_cache2 or prune_cache2[prune_state] > t:
-#                 prune_cache2[prune_state] = t
-# 
-#         next_states = list(next_possib_states())
-#         best_outcome = max(find_optimal_strategy_recurse(blueprint, next_state, cache, prune_cache, prune_cache2)
-#                            for next_state in next_states)
-#         # print(f"Cache for {state.time}")
-#         cache[state] = best_outcome
-#     return cache[state]
-
-
-def find_optimal_strategy_geodes(blueprint):
-    clear_print_state()
-    blueprint = {ORDER.index(k): {ORDER.index(k2): v2 for k2, v2 in v.items()} for k, v in blueprint.items()}
-#     return find_optimal_strategy_recurse(blueprint_ind, state, {}, {}, {})
-    pq = PriorityQueue()
-    empty = (0, 0, 0, 0)
-    state = State(resources=empty, robots=(0, 0, 0, 1), pending_robots=empty)
-    seen = set()
-    seen.add(state)
-    pq.put((state.time, -state.resources[0], state, []))
-    prune_cache = {}
-    while pq:
-        _, _, state, hist = pq.get()
-        if state.time == MAX_TIME:
-            return state.resources[0], hist
-        maybe_print(state.time, pq.qsize())
-
-        ps = state.prune_state()
-        if ps:
-            if state.time not in prune_cache:
-                prune_cache[state.time] = []
-            found_subset = False
-            subsumed = set()
-            for i, ps2 in enumerate(prune_cache[state.time]):
-                if all(p1 <= p2 for p1, p2 in zip(ps, ps2)):
-                    found_subset = True
-                    break
-                if all(p1 >= p2 for p1, p2 in zip(ps, ps2)):
-                    subsumed.add(i)
-            if found_subset:
-                continue
-            prune_cache[state.time] = [c for i, c in enumerate(prune_cache[state.time]) if i not in subsumed] + [ps]
-
-        enqueued = 0
-        can_build = False
-        choices = []
-        for bot, reqs in reversed(blueprint.items()):
-            if state.sufficient_resources(reqs):
-                can_build = True
-                next_state = state.start_making_bot(bot, reqs)
-                if next_state not in seen:
-                    seen.add(next_state)
-                    pq.put((next_state.time, -next_state.resources[0], next_state, hist + ["build %s" % ORDER[bot]]))
-                    enqueued += 1
-        if not can_build or will_waiting_let_me_build_a_bot_we_cant_build_now(state, blueprint):
-            next_state = state.time_step()
-            if next_state not in seen:
-                seen.add(next_state)
-                pq.put((next_state.time, -next_state.resources[0], next_state, hist + ["wait"]))
-                enqueued += 1
-                choices.append("Wait")
-        # print("State %s. Enqueued %d. %s" % (state, enqueued, choices))
-        
 def main():
     blueprints = parse()
     score = 0
     for index, blueprint in blueprints.items():
-        clear_print_state()
-        geodes, hist = find_optimal_strategy_geodes(blueprint)
+        geodes = find_optimal_strategy_geodes(blueprint)
         print("-->", index, geodes)
-        for evt in hist:
-            print("  ", evt)
+        # for evt in hist:
+        #     print("  ", evt)
         score += index * geodes
     return score
 
