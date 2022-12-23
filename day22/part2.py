@@ -1,132 +1,172 @@
 from part1 import *
 
+def only_one(lst):
+    els = list(lst)
+    assert len(els) == 1
+    return els[0]
+
 def build_graph_cube(active_positions):
-    positions = {k for k, v in active_positions.items() if v == EMPTY}
+    # FOLD CUBE
 
-    pos, _ = initial_pos(active_positions)
-    start_pos = pos
-    side_length = max(p[1] for p in active_positions if p[0] == pos[0]) - pos[1] + 1
+    directions = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+    edge = set()
+    for pos in active_positions:
+        neighbors = sum(1 if (pos[0] + d[0], pos[1] + d[1]) in active_positions else 0 for d in directions)
+        if neighbors < 4:
+            edge.add(pos)
+    start_point = min(edge)
+    direction = (0, 1)
+    next_point = (start_point[0] + direction[0], start_point[1] + direction[1])
+    assert next_point in edge
+    edge_ordered = [start_point, next_point]
+    cur_point = next_point
+    diags = set()
+    while cur_point != start_point:
+        next_point = (cur_point[0] + direction[0], cur_point[1] + direction[1])
+        if next_point in edge:
+            ...
+        elif next_point in active_positions:
+            # diag
+            found = False
+            for dy in range(-1, 2):
+                if found:
+                    break
+                for dx in range(-1, 2):
+                    pt = (cur_point[0] + dy, cur_point[1] + dx)
+                    if (dy, dx) != (0, 0) and pt not in edge_ordered and pt in edge:
+                        direction = (pt[0] - next_point[0], pt[1] - next_point[1])
+                        next_point = pt
+                        diags.add((cur_point, next_point))
+                        found = True
+                        break
+            assert next_point in edge
+        else:
+            for new_dir_inst in ["R", "L"]:
+                new_dir = turn(direction, new_dir_inst)
+                next_point = (cur_point[0] + new_dir[0], cur_point[1] + new_dir[1])
+                if next_point in edge:
+                    direction = new_dir
+                    break
+            assert next_point in edge
+        edge_ordered.append(next_point)
+        cur_point = next_point
+    edge_ordered = edge_ordered[:-1]
 
-    rules = [
-        (
-            # Pairings 4 right and 6 top
-            [
-                (
-                    (pos[0] + side_length + d, pos[1] + side_length - 1),
-                    (pos[0] + 2 * side_length, pos[1] + 2 * side_length - d - 1)
-                )
-                for d in range(0, side_length)
-            ],
-            # Direction changes:
-            (1, 0), # crossing 4 to 6
-            (0, -1), # crossing 6 to 4
-        ),
-        (
-            # Pairings 1 right and 6 right
-            [
-                (
-                    (pos[0] + d, pos[1] + side_length - 1),
-                    (pos[0] + 3 * side_length - d - 1, pos[1] + 2 * side_length - 1)
-                )
-                for d in range(0, side_length)
-            ],
-            # Direction changes:
-            (0, -1), # crossing 1 to 6
-            (0, -1), # crossing 6 to 1
-        ),
-        (
-            # Pairings 2 left and 6 bottom
-            [
-                (
-                    (pos[0] + side_length + d, pos[1] - 2 * side_length),
-                    (pos[0] + 3 * side_length - 1, pos[1] + 2 * side_length - d - 1)
-                )
-                for d in range(0, side_length)
-            ],
-            # Direction changes:
-            (-1, 0), # crossing 2 to 6
-            (0, 1), # crossing 6 to 2
-        ),
-        # Pairings 5 right and 6 left, unnecessary
-        # Pairings 1 bottom and 4 top, unnecessary
-        # Pairings 4 bottom and 5 top, unnecessary
-        (
-            # Pairings 2 bottom and 5 bottom
-            [
-                (
-                    (pos[0] + 2 * side_length - 1, pos[1] - 2 * side_length + d),
-                    (pos[0] + 3 * side_length - 1, pos[1] + side_length - d - 1),
-                )
-                for d in range(0, side_length)
-            ],
-            # Direction changes:
-            (-1, 0), # crossing 2 to 5
-            (-1, 0), # crossing 5 to 2
-        ),
-        (
-            # Pairings 1 top and 2 top
-            [
-                (
-                    (pos[0], pos[1] + d),
-                    (pos[0] + side_length, pos[1] - side_length - d - 1),
-                )
-                for d in range(0, side_length)
-            ],
-            # Direction changes:
-            (1, 0), # crossing 1 to 2
-            (1, 0), # crossing 2 to 1
-        ),
-        # Pairings 3 right and 4 left, unnecessary
-        # Pairings 3 left and 2 right, unnecessary
-        (
-            # Pairings 1 left and 3 top
-            [
-                (
-                    (pos[0] + d, pos[1]),
-                    (pos[0] + side_length, pos[1] - side_length + d),
-                )
-                for d in range(0, side_length)
-            ],
-            # Direction changes:
-            (1, 0), # crossing 1 to 3
-            (0, 1), # crossing 3 to 1
-        ),
-        (
-            # Pairings 3 bottom and 5 left
-            [
-                (
-                    (pos[0] + 2 * side_length - 1, pos[1] - side_length + d),
-                    (pos[0] + 3 * side_length - 1 - d, pos[1]),
-                )
-                for d in range(0, side_length)
-            ],
-            # Direction changes:
-            (0, 1), # crossing 3 to 5
-            (-1, 0), # crossing 5 to 3
-        ),
+    orientations = [{
+        d
+        for d in directions
+        if (cur_point[0] + d[0], cur_point[1] + d[1]) not in active_positions
+    } for cur_point in edge_ordered]
+
+    links = {}
+
+    N = len(edge_ordered)
+    for d1, d2 in diags:
+        # print("ZIP", d1, d2)
+        d1p = edge_ordered.index(d1)
+        d2p = edge_ordered.index(d2)
+        o1 = only_one(orientations[d1p])
+        o2 = only_one(orientations[d2p])
+        while True:
+            d1p_pos = edge_ordered[d1p]
+            d2p_pos = edge_ordered[d2p]
+            # print("LINK", d1p_pos, d2p_pos)
+            links[(d1p_pos, o1)] = (d2p_pos, tuple(-x for x in o2))
+            links[(d2p_pos, o2)] = (d1p_pos, tuple(-x for x in o1))
+            if len(orientations[d1p]) > 1 or len(orientations[d2p]) > 1: # corner
+                break
+            d1p = (d1p - 1) % N
+            d2p = (d2p + 1) % N
+    
+    # ZIP: 4r with 6t
+    # ZIP: 5l with 3b
+    # ZIP: 1l with 3t
+    
+    # ROUNDS:
+    # (0, 8), (4, 3): 1t with 2t
+    # (8, 15), (3, 11): 6r with 1r
+    # (11, 8), (7, 3): 5b with 2b
+    # (7, 0), (11, 12): 2l with 6b
+    while True:
+        # print("=========")
+        # print("New round")
+        # print("=========")
+        edge_with_orientation = {(p, o) for p, os in zip(edge_ordered, orientations) for o in os}
+        edge_not_linked = edge_with_orientation - set(links)
+        possible_link_locations = {p for p, _ in edge_not_linked} & {p for p, _ in links}
+        possible_link_locations = {
+            p for p in possible_link_locations
+            if not (
+                # don't match corner to corner; we'll lose all volume
+                len(orientations[edge_ordered.index(p)]) == 2
+                and len(orientations[edge_ordered.index(only_one(
+                    p2 for (p1, _), (p2, _) in links.items()
+                    if p1 == p
+                ))]) == 2
+            )
+        }
+        # print("Possible:", possible_link_locations)
+        if not possible_link_locations:
+            break
+        d1 = min(possible_link_locations)
+        _, o1 = only_one((p, o) for p, o in edge_not_linked if p == d1)
+        _, d2, o2_alt = only_one((o, p2, o2) for (p1, o), (p2, o2) in links.items() if p1 == d1 and o != o1)
+
+        d1p = edge_ordered.index(d1)
+        if o1 in orientations[(d1p + 1) % N]:
+            d1p_delta = 1
+        else:
+            d1p_delta = -1
+        assert (edge_ordered[d1p], o1) not in links
+        assert (edge_ordered[(d1p + d1p_delta) % N], o1) not in links
+
+        orientations_at_d2 = orientations[edge_ordered.index(d2)]
+        avail_orient_at_d2 = orientations_at_d2 - orientations_at_d2
+        if len(avail_orient_at_d2) == 0:
+            # flat edge, make fold
+            # print("flat edge")
+            d2p = edge_ordered.index(d2)
+            d2p_delta = 1 if not any(p == edge_ordered[(d2p + 1) % N] for p, _ in links) else -1
+            d2p += d2p_delta
+            o2 = only_one(orientations[d2p] & orientations[d2p + d2p_delta])
+            
+            assert (edge_ordered[d2p], o2) not in links
+            assert (edge_ordered[(d2p + d2p_delta) % N], o2) not in links
+        else:
+            # Unknown state
+            raise NotImplementedError
+
+        linked_pos = {p for p, _ in links}
+        linked_idc = {i for i, p in enumerate(edge_ordered) if p in linked_pos}
+        while True:
+            d1p_pos = edge_ordered[d1p]
+            d2p_pos = edge_ordered[d2p]
+            # print("Consider", d1p_pos, d2p_pos, d1p, d2p)
+            if o1 not in orientations[d1p] or o2 not in orientations[d2p]:
+                # print("Change in orientation", orientations[d1p], o1, orientations[d2p], o2)
+                break
+            if (d1p_pos, o1) in links or (d2p_pos, o2) in links:
+                # print("Already linked")
+                break
+            # print("LINK", d1p_pos, d2p_pos)
+            links[(d1p_pos, o1)] = (d2p_pos, tuple(-x for x in o2))
+            links[(d2p_pos, o2)] = (d1p_pos, tuple(-x for x in o1))
+            d1p = (d1p + d1p_delta) % N
+            d2p = (d2p + d2p_delta) % N
+    # print(possible_link_locations)
+    
+    edge_with_orientation = {(p, o) for p, os in zip(edge_ordered, orientations) for o in os}
+    assert len(edge_with_orientation - set(links)) == 0
         
-    ]
-    print(rules[0])
-    special = defaultdict(dict)
-    for rule in rules:
-        for pairs in rule[0]:
-            assert isinstance(pairs, tuple) and len(pairs) == 2
-            assert all(isinstance(p, tuple) and len(p) == 2 for p in pairs)
-            going = tuple(-1 * p for p in rule[2])
-            special[pairs[0]][going] = (pairs[1], rule[1])
-            assert isinstance(rule[1], tuple) and len(rule[1]) == 2
-            going = tuple(-1 * p for p in rule[1])
-            assert isinstance(rule[2], tuple) and len(rule[2]) == 2
-            special[pairs[1]][going] = (pairs[0], rule[2])
-
-
     adjacency = defaultdict(dict)
+    positions = {k for k, v in active_positions.items() if v == EMPTY}
     for pos in positions:
         # Up
         next_pos = (pos[0] - 1, pos[1])
         next_dir = (-1, 0)
         if next_pos not in active_positions:
-            next_pos, next_dir = special[pos][next_dir]
+            assert (pos, next_dir) in links
+            next_pos, next_dir = links[(pos, next_dir)]
 
         if active_positions[next_pos] == EMPTY:
             assert isinstance(next_dir, tuple) and len(next_dir) == 2
@@ -136,7 +176,8 @@ def build_graph_cube(active_positions):
         next_pos = (pos[0] + 1, pos[1])
         next_dir = (1, 0)
         if next_pos not in active_positions:
-            next_pos, next_dir = special[pos][next_dir]
+            assert (pos, next_dir) in links
+            next_pos, next_dir = links[(pos, next_dir)]
 
         if active_positions[next_pos] == EMPTY:
             assert isinstance(next_dir, tuple) and len(next_dir) == 2
@@ -146,11 +187,8 @@ def build_graph_cube(active_positions):
         next_pos = (pos[0], pos[1] + 1)
         next_dir = (0, 1)
         if next_pos not in active_positions:
-            print(special[pos])
-            print(start_pos)
-            print((pos[0] - start_pos[0], pos[1] - start_pos[1]))
-            print(tuple(p / side_length for p in pos))
-            next_pos, next_dir = special[pos][next_dir]
+            assert (pos, next_dir) in links
+            next_pos, next_dir = links[(pos, next_dir)]
 
         if active_positions[next_pos] == EMPTY:
             assert isinstance(next_dir, tuple) and len(next_dir) == 2
@@ -160,7 +198,8 @@ def build_graph_cube(active_positions):
         next_pos = (pos[0], pos[1] - 1)
         next_dir = (0, -1)
         if next_pos not in active_positions:
-            next_pos, next_dir = special[pos][next_dir]
+            assert (pos, next_dir) in links
+            next_pos, next_dir = links[(pos, next_dir)]
 
         if active_positions[next_pos] == EMPTY:
             assert isinstance(next_dir, tuple) and len(next_dir) == 2

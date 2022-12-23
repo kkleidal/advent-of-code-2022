@@ -71,6 +71,13 @@ def build_graph(active_positions):
             adjacency[pos][(0, -1)] = (next_pos, None)
     return adjacency
 
+def turn(my_dir, instruction):
+    if instruction == "L":
+        return (-1 * my_dir[1], my_dir[0])
+    else:
+        assert instruction == "R"
+        return (my_dir[1], -1 * my_dir[0])
+
 def initial_pos(active_positions):
     my_y = min(pos[0] for pos, v in active_positions.items() if v == EMPTY)
     my_x = min(pos[1] for pos, v in active_positions.items() if v == EMPTY and pos[0] == my_y)
@@ -91,11 +98,7 @@ def move(adjacency, my_pos, my_dir, instructions):
                         assert isinstance(dir_change, tuple) and len(dir_change) == 2
                         my_dir = dir_change
         else:
-            if instruction == "L":
-                my_dir = (-1 * my_dir[1], my_dir[0])
-            else:
-                assert instruction == "R"
-                my_dir = (my_dir[1], -1 * my_dir[0])
+            my_dir = turn(my_dir, instruction)
         # print(my_pos, my_dir, adjacency[my_pos])
     return my_pos, my_dir
 
